@@ -607,18 +607,12 @@ bool non_blocking_connect(socket_type s, asio::error_code& ec)
 int socketpair(int af, int type, int protocol,
     socket_type sv[2], asio::error_code& ec)
 {
-#if defined(ASIO_WINDOWS) || defined(__CYGWIN__)
   (void)(af);
   (void)(type);
   (void)(protocol);
   (void)(sv);
   ec = asio::error::operation_not_supported;
   return socket_error_retval;
-#else
-  int result = ::socketpair(af, type, protocol, sv);
-  get_last_error(ec, result != 0);
-  return result;
-#endif
 }
 
 bool sockatmark(socket_type s, asio::error_code& ec)
@@ -771,7 +765,7 @@ signed_size_type recv(socket_type s, buf* bufs, size_t count,
   msghdr msg = msghdr();
   msg.msg_iov = bufs;
   msg.msg_iovlen = static_cast<int>(count);
-  signed_size_type result = ::recvmsg(s, &msg, flags);
+  signed_size_type result = ::recv(s, &msg,count, flags);
   get_last_error(ec, result < 0);
   return result;
 #endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
@@ -1034,14 +1028,9 @@ signed_size_type recvfrom(socket_type s, buf* bufs, size_t count,
   ec.assign(0, ec.category());
   return bytes_transferred;
 #else // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
-  msghdr msg = msghdr();
-  init_msghdr_msg_name(msg.msg_name, addr);
-  msg.msg_namelen = static_cast<int>(*addrlen);
-  msg.msg_iov = bufs;
-  msg.msg_iovlen = static_cast<int>(count);
-  signed_size_type result = ::recvmsg(s, &msg, flags);
+
+  signed_size_type result = ::recvfrom(s, bufs, count, flags, addr, (socklen_t*) addrlen);
   get_last_error(ec, result < 0);
-  *addrlen = msg.msg_namelen;
   return result;
 #endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
 }
@@ -1256,21 +1245,8 @@ bool non_blocking_recvfrom1(socket_type s,
 signed_size_type recvmsg(socket_type s, buf* bufs, size_t count,
     int in_flags, int& out_flags, asio::error_code& ec)
 {
-#if defined(ASIO_WINDOWS) || defined(__CYGWIN__)
   out_flags = 0;
   return socket_ops::recv(s, bufs, count, in_flags, ec);
-#else // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
-  msghdr msg = msghdr();
-  msg.msg_iov = bufs;
-  msg.msg_iovlen = static_cast<int>(count);
-  signed_size_type result = ::recvmsg(s, &msg, in_flags);
-  get_last_error(ec, result < 0);
-  if (result >= 0)
-    out_flags = msg.msg_flags;
-  else
-    out_flags = 0;
-  return result;
-#endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
 }
 
 size_t sync_recvmsg(socket_type s, state_type state,
@@ -1386,13 +1362,8 @@ signed_size_type send(socket_type s, const buf* bufs, size_t count,
   ec.assign(0, ec.category());
   return bytes_transferred;
 #else // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
-  msghdr msg = msghdr();
-  msg.msg_iov = const_cast<buf*>(bufs);
-  msg.msg_iovlen = static_cast<int>(count);
-#if defined(__linux__)
-  flags |= MSG_NOSIGNAL;
-#endif // defined(__linux__)
-  signed_size_type result = ::sendmsg(s, &msg, flags);
+  
+  signed_size_type result = ::send(s, bufs, count, flags);
   get_last_error(ec, result < 0);
   return result;
 #endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
@@ -1613,15 +1584,7 @@ signed_size_type sendto(socket_type s, const buf* bufs, size_t count,
   ec.assign(0, ec.category());
   return bytes_transferred;
 #else // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
-  msghdr msg = msghdr();
-  init_msghdr_msg_name(msg.msg_name, addr);
-  msg.msg_namelen = static_cast<int>(addrlen);
-  msg.msg_iov = const_cast<buf*>(bufs);
-  msg.msg_iovlen = static_cast<int>(count);
-#if defined(__linux__)
-  flags |= MSG_NOSIGNAL;
-#endif // defined(__linux__)
-  signed_size_type result = ::sendmsg(s, &msg, flags);
+  signed_size_type result = ::sendto(s, bufs,count,flags, addr,addrlen);
   get_last_error(ec, result < 0);
   return result;
 #endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
@@ -2503,20 +2466,6 @@ const char* inet_ntop(int af, const void* src, char* dest, size_t length,
   get_last_error(ec, true);
   if (result == 0 && !ec)
     ec = asio::error::invalid_argument;
-  if (result != 0 && af == ASIO_OS_DEF(AF_INET6) && scope_id != 0)
-  {
-    using namespace std; // For strcat and sprintf.
-    char if_name[(IF_NAMESIZE > 21 ? IF_NAMESIZE : 21) + 1] = "%";
-    const in6_addr_type* ipv6_address = static_cast<const in6_addr_type*>(src);
-    bool is_link_local = ((ipv6_address->s6_addr[0] == 0xfe)
-        && ((ipv6_address->s6_addr[1] & 0xc0) == 0x80));
-    bool is_multicast_link_local = ((ipv6_address->s6_addr[0] == 0xff)
-        && ((ipv6_address->s6_addr[1] & 0x0f) == 0x02));
-    if ((!is_link_local && !is_multicast_link_local)
-        || if_indextoname(static_cast<unsigned>(scope_id), if_name + 1) == 0)
-      sprintf(if_name + 1, "%lu", scope_id);
-    strcat(dest, if_name);
-  }
   return result;
 #endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
 }
@@ -2756,23 +2705,6 @@ int inet_pton(int af, const char* src, void* dest,
   get_last_error(ec, true);
   if (result <= 0 && !ec)
     ec = asio::error::invalid_argument;
-  if (result > 0 && is_v6 && scope_id)
-  {
-    using namespace std; // For strchr and atoi.
-    *scope_id = 0;
-    if (if_name != 0)
-    {
-      in6_addr_type* ipv6_address = static_cast<in6_addr_type*>(dest);
-      bool is_link_local = ((ipv6_address->s6_addr[0] == 0xfe)
-          && ((ipv6_address->s6_addr[1] & 0xc0) == 0x80));
-      bool is_multicast_link_local = ((ipv6_address->s6_addr[0] == 0xff)
-          && ((ipv6_address->s6_addr[1] & 0x0f) == 0x02));
-      if (is_link_local || is_multicast_link_local)
-        *scope_id = if_nametoindex(if_name + 1);
-      if (*scope_id == 0)
-        *scope_id = atoi(if_name + 1);
-    }
-  }
   return result;
 #endif // defined(ASIO_WINDOWS) || defined(__CYGWIN__)
 }

@@ -17,6 +17,8 @@
 
 #include "asio/detail/config.hpp"
 
+#include "AsioIPV6Emulation.h"
+
 #if defined(ASIO_WINDOWS_RUNTIME)
 // Empty.
 #elif defined(ASIO_WINDOWS) || defined(__CYGWIN__)
@@ -307,12 +309,12 @@ struct in4_mreq_type
 typedef ip_mreq in4_mreq_type;
 # endif
 typedef sockaddr_in sockaddr_in4_type;
-typedef in6_addr in6_addr_type;
-typedef ipv6_mreq in6_mreq_type;
-typedef sockaddr_in6 sockaddr_in6_type;
-typedef sockaddr_storage sockaddr_storage_type;
-typedef sockaddr_un sockaddr_un_type;
+typedef in6_addr_emulation in6_addr_type;
+typedef ipv6_mreq_emulation in6_mreq_type;
+typedef sockaddr_in6_emulation sockaddr_in6_type;
+typedef sockaddr_storage_emulation sockaddr_storage_type;
 typedef addrinfo addrinfo_type;
+typedef sockaddr_un sockaddr_un_type;
 typedef ::linger linger_type;
 typedef int ioctl_arg_type;
 typedef uint32_t u_long_type;
